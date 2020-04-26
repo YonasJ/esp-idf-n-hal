@@ -1,0 +1,24 @@
+[package]
+name = "esp-idf-n-hal"
+version = "0.1.0"
+authors = ["Yonas Jongkind"]
+edition = "2018"
+
+[dependencies]
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+esp-idf-alloc = "0.1.1"
+xtensa-lx6-rt = { path = "../xtensa-lx6-rt" }
+esp32 = { path = "../esp32"}
+nb = "0.1.2"
+spin = "0.5.2"
+embedded-hal = {version="0.2.3",features = ["unproven"] }
+esp32-hal = { path= "../esp32-hal" }
+corepack = { version = "~0.4.0", default-features = false, features = ["alloc"] }
+
+[build-dependencies]
+clap = "^2"
+ex = "^0"
+bindgen = "^0"
+simple_logger = "^1"
+regex = "1"
+esp-idf-n-hal-build-support = { path="../esp-idf-n-hal-build-support"}
