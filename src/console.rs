@@ -6,22 +6,54 @@
 //!  println!("Hellgit");
 //! This uses the serial module to do the writing.
 
-use core::marker::PhantomData;
+use alloc::boxed::Box;
+#[cfg(not(feature = "prefer-esp-idf"))]
 use embedded_hal::serial::Write;
-use esp32::UART0;
+#[cfg(not(feature = "prefer-esp-idf"))]
 use esp32_hal::dport::Split;
+#[cfg(not(feature = "prefer-esp-idf"))]
 use esp32_hal::serial::config::{DataBits, Parity, StopBits};
-use esp32_hal::serial::{config::Config, NoRx, NoTx, Serial, Tx};
+#[cfg(not(feature = "prefer-esp-idf"))]
+use esp32_hal::serial::{config::Config, NoRx, NoTx, Rx, Serial, Tx};
+#[cfg(feature = "prefer-esp-idf")]
+use crate::esp_idf::{uart_write_bytes, uart_config_t, uart_word_length_t_UART_DATA_8_BITS, uart_parity_t_UART_PARITY_DISABLE, uart_stop_bits_t_UART_STOP_BITS_1, uart_hw_flowcontrol_t_UART_HW_FLOWCTRL_DISABLE, uart_config_t__bindgen_ty_1, uart_param_config, uart_set_pin, uart_driver_install, gpio_num_t_GPIO_NUM_1, gpio_num_t_GPIO_NUM_3, UART_PIN_NO_CHANGE, uart_flush};
+#[cfg(feature = "prefer-esp-idf")]
+use core::ptr;
+use crate::esp_idf::std::os::raw::c_int;
 
 pub struct Console {
-    pub started: bool,
-    pub tx: Tx<UART0>,
+    #[cfg(not(feature = "prefer-esp-idf"))]
+    pub rx: Rx<esp32::UART0>,
+    #[cfg(not(feature = "prefer-esp-idf"))]
+    pub tx: Tx<esp32::UART0>,
 }
+/// Global instance to address the serial port, used by the console.
+pub static mut CONSOLE: *mut Console = 0 as *mut Console;
+
+// Only used when we are using the IDF functions to write to the console.
+const UART_NUM:i32=0;
 
 /// Used to help create a standard console for printout out debug messages to the default serial which
 /// most dev board support through the USB port.
 impl Console {
-    pub fn begin(baud: u32) {
+    /// Use the defaults for most boards, that also works with the ESP-IDF default baud rate. Short hand for `begin_custom(115200);`.
+    pub fn begin() {
+        Console::begin_custom(115200)
+    }
+
+    /// Use a custom boad rate.
+    pub fn begin_custom(baud: u32) {
+        unsafe {
+            if CONSOLE == 0 as *mut Console {
+                let mut console = Self::new(baud);
+                CONSOLE = &mut *console;
+            } else if cfg!(feature = "training-wheels") {
+                panic!("Called Console.begin(), two times.");
+            }
+        }
+    }
+    #[cfg(not(feature = "prefer-esp-idf"))]
+    fn new(baud: u32) -> Box<Console> {
         let dp = unsafe { esp32::Peripherals::steal() };
 
         let (mut dport, dport_clock_control) = dp.DPORT.split();
@@ -32,7 +64,7 @@ impl Console {
             dport_clock_control,
             esp32_hal::clock_control::XTAL_FREQUENCY_AUTO,
         )
-        .unwrap();
+            .unwrap();
 
         let (clkcntrl_config, _watchdog) = clkcntrl.freeze().unwrap();
 
@@ -48,57 +80,125 @@ impl Console {
             clkcntrl_config,
             &mut dport,
         )
-        .unwrap();
+            .unwrap();
 
-        let (tx, _rx) = serial.split();
+        let (tx, rx) = serial.split();
+        Box::new(Console { tx, rx })
+    }
+    #[cfg(feature = "prefer-esp-idf")]
+    fn new(baud: u32) -> Box<Console> {
+        /* Configure parameters of an UART driver,
+     * communication pins and install the driver */
+        let uart_config = uart_config_t {
+            baud_rate: baud as c_int,
+            data_bits: uart_word_length_t_UART_DATA_8_BITS,
+            parity: uart_parity_t_UART_PARITY_DISABLE,
+            stop_bits: uart_stop_bits_t_UART_STOP_BITS_1,
+            flow_ctrl: uart_hw_flowcontrol_t_UART_HW_FLOWCTRL_DISABLE,
+            rx_flow_ctrl_thresh: 0,
+            __bindgen_anon_1: uart_config_t__bindgen_ty_1 {
+                use_ref_tick: false,
+            }
+        };
+
         unsafe {
-            CONSOLE.tx = tx;
-            CONSOLE.started = true;
+            const ECHO_TEST_TXD: i32 = gpio_num_t_GPIO_NUM_1 as i32;
+            const ECHO_TEST_RXD: i32 = gpio_num_t_GPIO_NUM_3 as i32;
+            const ECHO_TEST_RTS: i32 = UART_PIN_NO_CHANGE;
+            const ECHO_TEST_CTS: i32 = UART_PIN_NO_CHANGE;
+            const BUF_SIZE: i32 = 1024;
+            uart_param_config(UART_NUM, &uart_config);
+            uart_set_pin(UART_NUM, ECHO_TEST_TXD, ECHO_TEST_RXD, ECHO_TEST_RTS, ECHO_TEST_CTS);
+            uart_driver_install(UART_NUM, BUF_SIZE * 2, 0, 0, ptr::null_mut(), 0);
+        }
+
+        Box::new(Console { })
+    }
+
+    #[cfg(feature = "prefer-esp-idf")]
+    pub fn count() -> u8 {
+        0
+    }
+    #[cfg(not(feature = "prefer-esp-idf"))]
+    pub fn count() -> u8 {
+        unsafe { (*CONSOLE).tx.count() }
+    }
+
+    #[cfg(feature = "prefer-esp-idf")]
+    pub fn flush() -> nb::Result<(), core::convert::Infallible> {
+        unsafe {
+            uart_flush(UART_NUM);
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "prefer-esp-idf"))]
+    pub fn flush() -> nb::Result<(), core::convert::Infallible> {
+        unsafe {
+            while (*CONSOLE).tx.count() > 0 {
+                (*CONSOLE).tx.flush()?;
+            }
+        }
+        Ok(())
+    }
+    #[cfg(feature = "prefer-esp-idf")]
+    pub fn write(byte: u8) -> nb::Result<(), core::convert::Infallible> {
+        unsafe {
+            let b = [byte as i8];
+            uart_write_bytes(UART_NUM, &b as *const _, 1);
+            Ok(())
         }
     }
-    pub fn count(&mut self) -> u8 {
-        self.tx.count()
-    }
-    pub fn flush(&mut self) -> nb::Result<(), core::convert::Infallible> {
-        self.tx.flush()
-    }
-    pub fn write(&mut self, byte: u8) -> nb::Result<(), core::convert::Infallible> {
-        self.tx.write(byte)
+    #[cfg(not(feature = "prefer-esp-idf"))]
+    pub fn write(byte: u8) -> nb::Result<(), core::convert::Infallible> {
+        unsafe {
+            (*CONSOLE).tx.write(byte)
+        }
     }
 }
 
 impl core::fmt::Write for Console {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        s.as_bytes()
-            .iter()
-            .try_for_each(|c| nb::block!(self.write(*c)))
-            .map_err(|_| core::fmt::Error)
-    }
-}
 
-/// Serial transmitter
-pub static mut CONSOLE: Console = Console {
-    started: false,
-    tx: Tx {
-        _uart: PhantomData,
-        _apb_lock: None,
-    },
-};
+    #[cfg(feature = "prefer-esp-idf")]
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        unsafe {
+            uart_write_bytes(UART_NUM, s.as_ptr() as *const _, s.len() as u32);
+            Ok(())
+        }
+    }
+    #[cfg(not(feature = "prefer-esp-idf"))]
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        unsafe {
+            s.as_bytes()
+                .iter()
+                .try_for_each(|c| nb::block!(Console::write(*c)))
+                .map_err(|_| core::fmt::Error)
+        }
+    }
+
+}
 
 /// Macro for sending a formatted string to console (via UART0) for debugging
 #[macro_export]
 macro_rules! print {
     ($s:expr) => {
         unsafe {
-            if $crate::console::CONSOLE.started {
+            if $crate::console::CONSOLE != 0 as *mut $crate::console::Console {
                 use core::fmt::Write;
-                write!($crate::console::CONSOLE.tx, $s).unwrap();
+                write!((*$crate::console::CONSOLE), $s).unwrap();
+            } else if cfg!(feature = "training-wheels") {
+                panic!("print! the console, which has not been opened yet. Call Console.begin().");
             }
         }
     };
     ($($arg:tt)*) => {
-        use core::fmt::Write;
-        write!($crate::console::CONSOLE.tx, $($arg)*).unwrap();
+        unsafe {
+            if $crate::console::CONSOLE != 0 as *mut $crate::console::Console {
+                use core::fmt::Write;
+                write!((*$crate::console::CONSOLE), $($arg)*).unwrap();
+            } else if cfg!(feature = "training-wheels") {
+                panic!("print! the console, which has not been opened yet. Call Console.begin().");
+            }
+        }
     };
 }
 
@@ -106,28 +206,37 @@ macro_rules! print {
 #[macro_export]
 macro_rules! println {
     () => {
-        // unsafe {
-            if $crate::console::CONSOLE.started {
+        unsafe {
+            if $crate::console::CONSOLE != 0 as *mut $crate::console::Console {
                 use core::fmt::Write;
-                write!($crate::console::CONSOLE.tx, "\n").unwrap();
-            // }
+                write!((*$crate::console::CONSOLE), "\n").unwrap();
+            } else if cfg!(feature = "training-wheels") {
+                panic!("println! the console, which has not been opened yet. Call Console.begin().");
+            }
         }
     };
     ($fmt:expr) => {
-        // unsafe {
-            if $crate::console::CONSOLE.started {
+        unsafe {
+            if $crate::console::CONSOLE != 0 as *mut $crate::console::Console {
+                // let &mut console = console;
                 use core::fmt::Write;
-                writeln!($crate::console::CONSOLE.tx, $fmt).unwrap();
+                writeln!((*$crate::console::CONSOLE), $fmt).unwrap();
+            } else if cfg!(feature = "training-wheels") {
+                panic!(
+                    "println! the console, which has not been opened yet. Call Console.begin()."
+                );
             }
-        // }
+        }
     };
     ($fmt:expr, $($arg:tt)*) => {
-        // unsafe {
-            if $crate::console::CONSOLE.started {
+        unsafe {
+            if $crate::console::CONSOLE != 0 as *mut $crate::console::Console {
                 use core::fmt::Write;
-                writeln!($crate::console::CONSOLE.tx, $fmt, $($arg)*).unwrap();
+                writeln!((*$crate::console::CONSOLE), $fmt, $($arg)*).unwrap();
+            } else if cfg!(feature = "training-wheels") {
+                panic!("println! the console, which has not been opened yet. Call Console.begin().");
             }
-        // }
+        }
     };
 }
 
@@ -136,8 +245,8 @@ macro_rules! println {
 macro_rules! flush {
     () => {
         unsafe {
-            if $crate::console::CONSOLE.started {
-                $crate::console::CONSOLE.flush().unwrap();
+            if $crate::console::CONSOLE != 0 as *mut $crate::console::Console {
+                (*$crate::console::CONSOLE).flush().unwrap();
             }
         }
     };
