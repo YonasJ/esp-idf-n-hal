@@ -15,6 +15,7 @@ core_collections = [] # fro freertos
 embedded-hal = {version="0.2.3",features = ["unproven"] }
 
 esp-idf-alloc = "0.1.1"
+<<<<<<< HEAD
 alloc-no-stdlib = "2.0.1"
 
 corepack = { version = "~0.4.0", default-features = false, features = ["alloc"] }
@@ -23,6 +24,10 @@ corepack = { version = "~0.4.0", default-features = false, features = ["alloc"] 
 esp32-hal = { path = "../deps/esp32-hal" }
 esp32 = { path = "../deps/esp32" }
 
+=======
+xtensa-lx6-rt = { path = "../deps/xtensa-lx6-rt" }
+esp32 = { path = "../deps/esp32"}
+>>>>>>> d00d2ff0275cb98c680ebb0e3cf1aad83314aee1
 nb = "0.1.2"
 spin = "0.5.2"
 
