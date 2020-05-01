@@ -4,6 +4,10 @@
     <exclude-output />
     <content url="file://$MODULE_DIR$">
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../deps/esp32/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../deps/esp32-hal/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../deps/esp32-hal/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../deps/xtensa-lx6-rt/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

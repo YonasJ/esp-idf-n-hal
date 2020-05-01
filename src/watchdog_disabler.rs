@@ -1,5 +1,4 @@
-use esp32_hal::dport::Split;
-use esp32_hal::prelude::*;
+use esp32_hal::{dport::Split, prelude::*};
 
 const WDT_WKEY_VALUE: u32 = 0x50D83AA1;
 
@@ -17,25 +16,18 @@ pub fn disable() {
     // we will do it manually on startup
     disable_timg_wdts(&mut timg0, &mut timg1);
 
-    let clkcntrl = esp32_hal::clock_control::ClockControl::new(
-        dp.RTCCNTL,
-        dp.APB_CTRL,
-        dport_clock_control,
-        esp32_hal::clock_control::XTAL_FREQUENCY_AUTO,
-    )
-    .unwrap();
+    let clkcntrl = esp32_hal::clock_control::ClockControl::new(dp.RTCCNTL,
+                                                               dp.APB_CTRL,
+                                                               dport_clock_control,
+                                                               esp32_hal::clock_control::XTAL_FREQUENCY_AUTO).unwrap();
 
     let (_clkcntrl_config, mut watchdog) = clkcntrl.freeze().unwrap();
     watchdog.disable();
 }
 
 fn disable_timg_wdts(timg0: &mut esp32::TIMG0, timg1: &mut esp32::TIMG1) {
-    timg0
-        .wdtwprotect
-        .write(|w| unsafe { w.bits(WDT_WKEY_VALUE) });
-    timg1
-        .wdtwprotect
-        .write(|w| unsafe { w.bits(WDT_WKEY_VALUE) });
+    timg0.wdtwprotect.write(|w| unsafe { w.bits(WDT_WKEY_VALUE) });
+    timg1.wdtwprotect.write(|w| unsafe { w.bits(WDT_WKEY_VALUE) });
 
     timg0.wdtconfig0.write(|w| unsafe { w.bits(0x0) });
     timg1.wdtconfig0.write(|w| unsafe { w.bits(0x0) });
